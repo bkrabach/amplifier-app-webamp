@@ -186,14 +186,12 @@ async function loadPyodide() {
     await micropip.install(pkg);
   }
   
-  // Install amplifier-core from local wheel if enabled
-  if (CONFIG.useAmplifierCore) {
-    updateStep('step-pyodide', 'loading', 'Installing amplifier-core...');
-    // micropip needs a full URL, not just a path
-    const wheelUrl = new URL(CONFIG.amplifierCoreWheel, window.location.origin).href;
-    console.log('Installing amplifier-core from:', wheelUrl);
-    await micropip.install(wheelUrl);
-  }
+  // Install amplifier-core from local wheel
+  updateStep('step-pyodide', 'loading', 'Installing amplifier-core...');
+  // micropip needs a full URL, not just a path
+  const wheelUrl = new URL(CONFIG.amplifierCoreWheel, window.location.origin).href;
+  console.log('Installing amplifier-core from:', wheelUrl);
+  await micropip.install(wheelUrl);
   
   updateStep('step-pyodide', 'done', `Python ${pyodide.version} ready`);
   updateStatusBadge('pyodide-status', 'ready', `Pyodide: ${pyodide.version}`);
