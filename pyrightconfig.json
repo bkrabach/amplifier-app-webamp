@@ -1,0 +1,21 @@
+{
+  "include": ["src/python"],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".venv",
+    "amplifier-core",
+    "amplifier-foundation",
+    "amplifier",
+    "src/python/amplifier_browser_shim.py"
+  ],
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "All",
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "strictListInference": true,
+  "strictDictionaryInference": true
+}

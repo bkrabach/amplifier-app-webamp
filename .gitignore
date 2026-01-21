@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Test artifacts
+playwright-report/
+test-results/
+
+# Vite
+.vite/
+
+# Python
+__pycache__/
+*.pyc
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

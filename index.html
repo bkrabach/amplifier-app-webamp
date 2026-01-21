@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Amplifier Browser PoC</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1rem 2rem;
+      border-bottom: 1px solid #333;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      background: #333;
+      color: #888;
+    }
+
+    .status-badge.ready {
+      background: #1a3d1a;
+      color: #4ade80;
+    }
+
+    .status-badge.loading {
+      background: #3d3d1a;
+      color: #facc15;
+    }
+
+    .status-badge.error {
+      background: #3d1a1a;
+      color: #f87171;
+    }
+
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+
+    /* Loading screen */
+    #loading-screen {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2rem;
+    }
+
+    .loading-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .loading-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .loading-step {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem 1rem;
+      background: #1a1a1a;
+      border-radius: 8px;
+    }
+
+    .loading-step .icon {
+      width: 24px;
+      height: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .loading-step .spinner {
+      width: 18px;
+      height: 18px;
+      border: 2px solid #333;
+      border-top-color: #facc15;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-step .check {
+      color: #4ade80;
+      font-size: 1.25rem;
+    }
+
+    .loading-step .pending {
+      color: #666;
+    }
+
+    .loading-step .label {
+      flex: 1;
+    }
+
+    .loading-step .detail {
+      font-size: 0.75rem;
+      color: #666;
+    }
+
+    .loading-step.active .label {
+      color: #fff;
+    }
+
+    .loading-step.done .label {
+      color: #4ade80;
+    }
+
+    /* Chat interface */
+    #chat-container {
+      display: none;
+      flex-direction: column;
+      flex: 1;
+      gap: 1rem;
+    }
+
+    #chat-container.visible {
+      display: flex;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      padding: 1rem 0;
+    }
+
+    .message {
+      display: flex;
+      gap: 0.75rem;
+      max-width: 85%;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .message .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.875rem;
+      flex-shrink: 0;
+    }
+
+    .message.user .avatar {
+      background: #3b82f6;
+    }
+
+    .message.assistant .avatar {
+      background: #8b5cf6;
+    }
+
+    .message .content {
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      line-height: 1.5;
+    }
+
+    .message.user .content {
+      background: #3b82f6;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant .content {
+      background: #1a1a1a;
+      border-bottom-left-radius: 4px;
+    }
+
+    .message .content pre {
+      background: #0a0a0a;
+      padding: 0.5rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      margin: 0.5rem 0;
+    }
+
+    .message .content code {
+      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-size: 0.875rem;
+    }
+
+    /* Typing indicator */
+    .typing-indicator {
+      display: flex;
+      gap: 4px;
+      padding: 0.75rem 1rem;
+    }
+
+    .typing-indicator span {
+      width: 8px;
+      height: 8px;
+      background: #666;
+      border-radius: 50%;
+      animation: typing 1.4s infinite ease-in-out;
+    }
+
+    .typing-indicator span:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator span:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes typing {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-4px); }
+    }
+
+    /* Input area */
+    #input-area {
+      display: flex;
+      gap: 0.5rem;
+      padding: 1rem;
+      background: #1a1a1a;
+      border-radius: 12px;
+    }
+
+    #input-area textarea {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #e0e0e0;
+      font-size: 1rem;
+      font-family: inherit;
+      resize: none;
+      outline: none;
+      min-height: 24px;
+      max-height: 150px;
+    }
+
+    #input-area textarea::placeholder {
+      color: #666;
+    }
+
+    #input-area button {
+      padding: 0.5rem 1rem;
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #input-area button:hover:not(:disabled) {
+      background: #2563eb;
+    }
+
+    #input-area button:disabled {
+      background: #333;
+      color: #666;
+      cursor: not-allowed;
+    }
+
+    /* Stats bar */
+    #stats-bar {
+      display: flex;
+      gap: 1rem;
+      padding: 0.5rem 1rem;
+      background: #1a1a1a;
+      border-radius: 8px;
+      font-size: 0.75rem;
+      color: #666;
+    }
+
+    #stats-bar .stat {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    #stats-bar .stat-value {
+      color: #e0e0e0;
+    }
+
+    /* Error message */
+    .error-banner {
+      background: #3d1a1a;
+      border: 1px solid #7f1d1d;
+      color: #fca5a5;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+    }
+
+    /* Model selector */
+    #model-info {
+      font-size: 0.875rem;
+      color: #888;
+      padding: 0.5rem 0;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Amplifier Browser PoC</h1>
+    <span id="pyodide-status" class="status-badge">Pyodide: --</span>
+    <span id="webllm-status" class="status-badge">WebLLM: --</span>
+  </header>
+
+  <main>
+    <!-- Loading screen -->
+    <div id="loading-screen">
+      <div class="loading-title">Initializing Browser AI...</div>
+      <div class="loading-steps">
+        <div class="loading-step" id="step-webgpu">
+          <div class="icon"><span class="pending">○</span></div>
+          <div class="label">Check WebGPU Support</div>
+        </div>
+        <div class="loading-step" id="step-pyodide">
+          <div class="icon"><span class="pending">○</span></div>
+          <div class="label">Load Python Runtime (Pyodide)</div>
+          <div class="detail" id="pyodide-detail"></div>
+        </div>
+        <div class="loading-step" id="step-webllm">
+          <div class="icon"><span class="pending">○</span></div>
+          <div class="label">Load LLM Engine (WebLLM)</div>
+          <div class="detail" id="webllm-detail"></div>
+        </div>
+        <div class="loading-step" id="step-model">
+          <div class="icon"><span class="pending">○</span></div>
+          <div class="label">Download Model</div>
+          <div class="detail" id="model-detail"></div>
+        </div>
+        <div class="loading-step" id="step-amplifier">
+          <div class="icon"><span class="pending">○</span></div>
+          <div class="label">Initialize Amplifier Session</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chat interface (hidden until ready) -->
+    <div id="chat-container">
+      <div id="model-info"></div>
+      <div id="messages"></div>
+      <div id="input-area">
+        <textarea 
+          id="user-input" 
+          placeholder="Type a message..." 
+          rows="1"
+          disabled
+        ></textarea>
+        <button id="send-btn" disabled>Send</button>
+      </div>
+      <div id="stats-bar">
+        <div class="stat">Model: <span class="stat-value" id="stat-model">--</span></div>
+        <div class="stat">Speed: <span class="stat-value" id="stat-speed">--</span></div>
+        <div class="stat">Memory: <span class="stat-value" id="stat-memory">--</span></div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

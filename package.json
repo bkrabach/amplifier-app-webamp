@@ -1,0 +1,19 @@
+{
+  "name": "amplifier-browser-poc",
+  "version": "0.1.0",
+  "description": "Proof of concept: Amplifier + WebGPU LLM running entirely in browser",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@mlc-ai/web-llm": "^0.2.79"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "playwright": "^1.57.0",
+    "vite": "^6.0.0"
+  }
+}
