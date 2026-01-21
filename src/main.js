@@ -9,13 +9,36 @@
 
 import { CreateMLCEngine } from '@mlc-ai/web-llm';
 
+// Model configurations
+const MODELS = {
+  // High quality model - requires shader-f16 (works on Mac/desktop with good GPU)
+  phi: {
+    id: 'Phi-3.5-mini-instruct-q4f16_1-MLC',
+    name: 'Phi-3.5 Mini',
+    requiresF16: true,
+    vram: 2500,  // ~2.5GB VRAM
+  },
+  // Fallback model - no shader-f16 needed (works in headless Chrome, CI, older GPUs)
+  llama1b: {
+    id: 'Llama-3.2-1B-Instruct-q4f32_1-MLC',
+    name: 'Llama-3.2 1B',
+    requiresF16: false,
+    vram: 1200,  // ~1.2GB VRAM
+  },
+  // Better fallback - no shader-f16 needed, better quality than 1B
+  llama3b: {
+    id: 'Llama-3.2-3B-Instruct-q4f32_1-MLC',
+    name: 'Llama-3.2 3B',
+    requiresF16: false,
+    vram: 3000,  // ~3GB VRAM
+  },
+};
+
 // Configuration
 const CONFIG = {
-  // Model options:
-  // - 'Phi-3.5-mini-instruct-q4f16_1-MLC' - Best quality, requires shader-f16 (works on Mac/desktop)
-  // - 'Llama-3.2-1B-Instruct-q4f32_1-MLC' - No shader-f16 needed (works in headless Chrome)
-  // - 'Llama-3.2-3B-Instruct-q4f32_1-MLC' - Better quality, no shader-f16 needed
-  modelId: 'Llama-3.2-1B-Instruct-q4f32_1-MLC',  // Using f32 model for broader compatibility
+  // Model selection: 'auto', 'phi', 'llama1b', 'llama3b'
+  // 'auto' will detect shader-f16 support and choose best available
+  modelSelection: 'auto',
   
   // Pyodide CDN
   pyodideUrl: 'https://cdn.jsdelivr.net/pyodide/v0.27.0/full/',
@@ -25,15 +48,45 @@ const CONFIG = {
   
   // Local wheel for amplifier-core (served from /wheels/)
   amplifierCoreWheel: '/wheels/amplifier_core-1.0.0-py3-none-any.whl',
-  
-  // Use real amplifier-core (set to false to use simplified version)
-  useAmplifierCore: true,
 };
+
+/**
+ * Detect WebGPU capabilities and select the best model.
+ * @returns {Object} Selected model config
+ */
+async function selectModel() {
+  // Check for explicit model selection (not auto)
+  if (CONFIG.modelSelection !== 'auto' && MODELS[CONFIG.modelSelection]) {
+    console.log(`Using explicitly configured model: ${CONFIG.modelSelection}`);
+    return MODELS[CONFIG.modelSelection];
+  }
+  
+  // Auto-detect: check for shader-f16 support
+  try {
+    const adapter = await navigator.gpu?.requestAdapter();
+    if (adapter) {
+      const hasF16 = adapter.features.has('shader-f16');
+      console.log(`WebGPU shader-f16 support: ${hasF16}`);
+      
+      if (hasF16) {
+        console.log('Using Phi-3.5 (f16 supported)');
+        return MODELS.phi;
+      }
+    }
+  } catch (e) {
+    console.warn('Error detecting WebGPU features:', e);
+  }
+  
+  // Fallback to f32 model
+  console.log('Using Llama-3.2-1B (f32 fallback for compatibility)');
+  return MODELS.llama1b;
+}
 
 // Global state
 let pyodide = null;
 let llmEngine = null;
 let isGenerating = false;
+let selectedModel = null;  // Will be set by selectModel()
 
 // UI Elements
 const elements = {
@@ -166,14 +219,17 @@ async function loadWebLLM() {
   };
   
   updateStep('step-webllm', 'done', 'Engine ready');
-  updateStep('step-model', 'loading', 'Starting download...');
   
-  // Create the engine with the specified model
-  llmEngine = await CreateMLCEngine(CONFIG.modelId, {
+  // Select the best model based on GPU capabilities
+  selectedModel = await selectModel();
+  updateStep('step-model', 'loading', `Downloading ${selectedModel.name}...`);
+  
+  // Create the engine with the selected model
+  llmEngine = await CreateMLCEngine(selectedModel.id, {
     initProgressCallback,
   });
   
-  updateStep('step-model', 'done', CONFIG.modelId);
+  updateStep('step-model', 'done', selectedModel.name);
   updateStatusBadge('webllm-status', 'ready', 'WebLLM: Ready');
   
   return llmEngine;
@@ -183,12 +239,8 @@ async function loadWebLLM() {
 async function initAmplifierSession() {
   updateStep('step-amplifier', 'loading');
   
-  // Load the Python adapter code
-  // Load the appropriate Python module based on config
-  const pythonFile = CONFIG.useAmplifierCore 
-    ? '/src/python/amplifier_browser_shim.py'  // Real amplifier-core integration
-    : '/src/python/amplifier_browser.py';       // Simplified standalone version
-  
+  // Load the Python adapter code (amplifier-core browser shim)
+  const pythonFile = '/src/python/amplifier_browser_shim.py';
   const response = await fetch(pythonFile);
   const pythonCode = await response.text();
   
@@ -248,21 +300,12 @@ async function initAmplifierSession() {
     });
   });
   
-  // Initialize the session in Python
-  const sessionInitCode = CONFIG.useAmplifierCore
-    ? `
-# Using real amplifier-core with browser shim
-session = create_session(model_id="${CONFIG.modelId}")
+  // Initialize the session in Python (using amplifier-core browser shim)
+  await pyodide.runPythonAsync(`
+session = create_session(model_id="${selectedModel.id}")
 await session.initialize()
 print("Amplifier Browser Session (with amplifier-core) initialized!")
-`
-    : `
-# Using simplified standalone version
-session = AmplifierBrowserSession()
-print("Amplifier Browser Session (standalone) initialized!")
-`;
-  
-  await pyodide.runPythonAsync(sessionInitCode);
+`);
   
   updateStep('step-amplifier', 'done');
   
@@ -295,44 +338,33 @@ async function sendMessage(userMessage) {
     
     const contentEl = assistantMessageEl.querySelector('.content');
     let fullResponse = '';
+    let firstChunk = true;
     
     // Track timing
     const startTime = performance.now();
-    let tokenCount = 0;
     
-    // Set up streaming callback in Python
-    await pyodide.runPythonAsync(`
-import json
-from js import document
-
-response_chunks = []
-
-def on_stream_chunk(chunk):
-    response_chunks.append(chunk)
-    # Update will happen from JS side
-    `);
-    
-    // Create a JavaScript function that Python can call
-    const onChunk = (chunk) => {
+    // Set up streaming callback that Python can call
+    // This gets registered globally so js_llm_stream can use it
+    window._streamCallback = (chunk) => {
       // Remove typing indicator on first chunk
-      if (typingEl.parentNode) {
+      if (firstChunk) {
+        firstChunk = false;
         typingEl.remove();
         elements.messages.appendChild(assistantMessageEl);
       }
       
       fullResponse += chunk;
       contentEl.textContent = fullResponse;
-      tokenCount++;
       
       // Scroll to bottom
       elements.messages.scrollTop = elements.messages.scrollHeight;
     };
     
-    // Execute through Python session
+    // Execute through Python session with streaming
     const resultJson = await pyodide.runPythonAsync(`
 import json
-import asyncio
 from pyodide.ffi import create_proxy
+from js import window
 
 async def run_completion():
     messages_json = json.dumps([
@@ -344,8 +376,11 @@ async def run_completion():
     # Add to history
     session.history.append({"role": "user", "content": ${JSON.stringify(userMessage)}})
     
-    # Call JavaScript LLM
-    result_json = await js_llm_stream(messages_json, create_proxy(lambda c: None))
+    # Create proxy for streaming callback
+    stream_callback = create_proxy(window._streamCallback)
+    
+    # Call JavaScript LLM with streaming
+    result_json = await js_llm_stream(messages_json, stream_callback)
     result = json.loads(result_json)
     
     # Add response to history
@@ -356,14 +391,15 @@ async def run_completion():
 await run_completion()
     `);
     
-    // Parse result and do non-streaming fallback if needed
+    // Parse result
     const result = JSON.parse(resultJson);
     
-    // If streaming didn't populate, use final result
-    if (!fullResponse) {
+    // If streaming didn't populate (fallback), use final result
+    if (!fullResponse && result.content) {
       typingEl.remove();
       elements.messages.appendChild(assistantMessageEl);
       contentEl.textContent = result.content;
+      fullResponse = result.content;
     }
     
     // Calculate stats
@@ -381,10 +417,14 @@ await run_completion()
       elements.statMemory.textContent = `${usedMB} MB`;
     }
     
+    // Clean up
+    delete window._streamCallback;
+    
   } catch (error) {
     console.error('Error:', error);
     typingEl.remove();
     addMessage('assistant', `Error: ${error.message}`);
+    delete window._streamCallback;
   } finally {
     isGenerating = false;
     elements.sendBtn.disabled = false;
@@ -488,13 +528,13 @@ async function init() {
     elements.userInput.focus();
     
     // Update stats
-    elements.statModel.textContent = CONFIG.modelId.split('-').slice(0, 3).join('-');
-    elements.modelInfo.textContent = `Model: ${CONFIG.modelId} | Running locally via WebGPU`;
+    elements.statModel.textContent = selectedModel.name;
+    elements.modelInfo.textContent = `Model: ${selectedModel.name} | Running locally via WebGPU`;
     
     // Add welcome message
     addMessage('assistant', 
       `Hello! I'm running entirely in your browser using WebGPU - no server required! ` +
-      `I'm powered by ${CONFIG.modelId.split('-')[0]} and can help you with questions, writing, coding, and more. ` +
+      `I'm powered by ${selectedModel.name} and can help you with questions, writing, coding, and more. ` +
       `What would you like to discuss?`
     );
     
